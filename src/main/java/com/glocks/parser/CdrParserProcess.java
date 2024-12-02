@@ -2,7 +2,6 @@ package com.glocks.parser;
 
 import com.glocks.configuration.ConnectionConfiguration;
 import com.glocks.constants.PropertiesReader;
-import com.glocks.files.FileList;
 import com.glocks.util.Util;
 import com.ulisesbocchio.jasyptspringboot.annotation.EnableEncryptableProperties;
 import org.apache.logging.log4j.LogManager;
@@ -16,6 +15,9 @@ import org.springframework.scheduling.annotation.EnableAsync;
 
 import java.io.*;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.sql.*;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
@@ -23,6 +25,7 @@ import java.util.Date;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 @EnableAsync
@@ -55,6 +58,7 @@ public class CdrParserProcess {
     static String sqlInputPath;
     static String p3ProcessedPath;
     static String sleepTime;
+    static String p3InputPath;
 
 
     public static void main(String[] args) { // OPERATOR FilePath
@@ -70,62 +74,30 @@ public class CdrParserProcess {
         auddbName = propertiesReader.auddbName;
         repdbName = propertiesReader.repdbName;
         serverName = propertiesReader.serverName;
-        sqlInputPath = propertiesReader.sqlInputPath;
-        p3ProcessedPath = propertiesReader.p3ProcessedPath;
+        sqlInputPath = propertiesReader.sqlInputPath + "/";
+        p3ProcessedPath = propertiesReader.p3ProcessedPath + "/";
+        p3InputPath = propertiesReader.p3InputPath + "/";
         dateFunction = Util.defaultDateNow(conn.toString().contains("oracle"));
-        logger.info(" appdbName:" + appdbName);
-
-        String filePath = null;
-        if (args[0] == null) {
-            logger.error("Enter the Correct File Path");
-        } else {
-            filePath = args[0].trim();
-        }
-        if (!filePath.endsWith("/")) {
-            filePath += "/";
-        }
         try {
-            CdrParserProces(conn, filePath);
+            String operatorName = args[0];
+            String counter = args[1];
+            String filePath = p3InputPath + args[0] + "/" + args[1] + "/";
+            logger.info(" FilePath:" + filePath);
+            CdrParserProces(conn, filePath, operatorName, counter);
         } catch (Exception e) {
-            try {
-                conn.rollback();
-            } catch (SQLException ex) {
-                logger.error("" + e);
-            }
+            logger.error("Something went wrong " + e);
         } finally {
             try {
                 conn.close();
-            } catch (SQLException ex) {
+            } catch (Exception ex) {
                 logger.error(ex);
             }
             System.exit(0);
         }
     }
 
-    public static void CdrParserProces(Connection conn, String filePath) {
-        logger.debug(" FilePath :" + filePath);
-        String source = null;
-        String operator = null;
-        if (filePath != null) {
-            String[] arrOfStr = filePath.split("/", 0);
-            int val = 0;
-            for (int i = (arrOfStr.length - 1); i >= 0; i--) {
-                if (val == 1) {
-                    source = arrOfStr[i];
-                }
-                if (val == 2) {
-                    operator = arrOfStr[i].toUpperCase();
-                }
-                val++;
-            }
-        }
-        String fileName = new FileList().readOldestOneFile(filePath);
-        if (fileName == null) {
-            logger.debug(" No File Found");
-            return;
-        }
-        logger.debug(" FilePath :" + filePath + "; FileName:" + fileName + ";source : " + source + " ; Operator : "
-                + operator);
+    public static void CdrParserProces(Connection conn, String filePath, String operator, String source) {
+        logger.debug(" FilePath :" + filePath + ";source : " + source + " ; Operator : " + operator);
         String operator_tag = getOperatorTag(conn, operator);
         logger.debug("Operator tag is [" + operator_tag + "] ");
         ArrayList rulelist = new ArrayList<Rule>();
@@ -133,14 +105,39 @@ public class CdrParserProcess {
         logger.debug("Period is [" + period + "] ");
         rulelist = getRuleDetails(operator, conn, operator_tag, period);
         logger.debug("rule list to be  " + rulelist);
-        addCDRInProfileWithRule(operator, conn, rulelist, operator_tag, period, filePath, source, fileName);
+        for (Path file : getAllFilesList(filePath)) {
+            logger.info("Start executing process for : " + file.getFileName());
+            addCDRInProfileWithRule(operator, conn, rulelist, operator_tag, period, filePath, source, file.getFileName().toString());
+            logger.info("Ending executing process for : " + file.getFileName());
+        }
+    }
+
+    private static List<Path> getAllFilesList(String path) {
+        List<Path> files_at_directory = null;
+        try {
+            files_at_directory = Files.list(Paths.get(path))
+                    .filter(Files::isRegularFile)
+                    .sorted(Comparator.comparingLong(pat -> {
+                        try {
+                            return Files.readAttributes(pat, BasicFileAttributes.class).creationTime().toMillis();
+                        } catch (IOException e) {
+                            logger.error("Not able to retrieve the Files" + e);
+                            throw new RuntimeException(e);
+                        }
+                    }))
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            logger.error("Corrupt file or No File Present at  " + e);
+        }
+        logger.info("Total Files to be processed : " + files_at_directory.size());
+        return files_at_directory;
     }
 
     private static void addCDRInProfileWithRule(String operator, Connection conn, ArrayList<Rule> rulelist,
                                                 String operator_tag, String period, String filePath, String source, String fileName) {
-        ExecutorService executorService = Executors.newCachedThreadPool();
 
-        int insertedKey = insertModuleAudit(conn, "P3", operator + "_" + source);
+        ExecutorService executorService = Executors.newCachedThreadPool();
+        int insertedKey = insertModuleAudit(conn, "P3", operator + "_" + source + "_" + fileName);
         long executionStartTime = new Date().getTime();
         int output = 0;
         String my_query = "";
@@ -159,7 +156,6 @@ public class CdrParserProcess {
         int counter = 1;
         int foreignMsisdn = 0;
         int fileParseLimit = 1;
-
         int errorCount = 0;
         int fileCount = 0;
         try {
@@ -172,7 +168,6 @@ public class CdrParserProcess {
                 logger.warn("" + e);
             }
             String enableForeignSimHandling = getSystemConfigDetailsByTag(conn, "enableForeignSimHandling");
-            // if fileName present in SQlFolder , get count of file else make countt 1
             fileParseLimit = getExsistingSqlFileDetails(conn, operator, source, fileName);
             fr = new FileReader(file);
             br = new BufferedReader(fr);
@@ -222,7 +217,7 @@ public class CdrParserProcess {
                         logger.info(".test_imei_details Query :: ." + query);
                         executorService.execute(new InsertDbDao(conn, query));
                     }
-                    device_info.put("testImeiFlag", anyMatch ? "1": "0" );
+                    device_info.put("testImeiFlag", anyMatch ? "1" : "0");
                     String failedRuleDate = null;
                     counter++;
                     if (device_info.get("MSISDN").startsWith(propertiesReader.localMsisdnStartSeries) && device_info.get("IMSI").startsWith(propertiesReader.localISMIStartSeries)) {
@@ -339,7 +334,7 @@ public class CdrParserProcess {
                     if (my_query.contains("insert")) {
                         executorService.execute(new InsertDbDao(conn, my_query));
                     } else {
-                        logger.info(" writing query in file== " + my_query);
+                        //   logger.info(" writing query in file== " + my_query);
                         bw1.write(my_query + ";");
                         bw1.newLine();
                     }
@@ -352,7 +347,12 @@ public class CdrParserProcess {
             Date p2Endtime = new Date();
             cdrFileDetailsUpdate(conn, operator, device_info.get("file_name"), usageInsert, usageUpdate, duplicateInsert, duplicateUpdate, nullInsert, nullUpdate, p2Starttime, p2Endtime, "all", counter, device_info.get("raw_cdr_file_name"),
                     foreignMsisdn, server_origin, usageInsertForeign, usageUpdateForeign, duplicateInsertForeign, duplicateUpdateForeign, errorCount);
-            new com.glocks.files.FileList().moveCDRFile(conn, fileName, operator, filePath, source, p3ProcessedPath);
+            // new com.glocks.files.FileList().moveCDRFile(conn, fileName, operator, filePath, source, p3ProcessedPath);
+
+            Files.createDirectories(Path.of(p3ProcessedPath + operator + "/" + source));
+            Path temp = Files.move(Paths.get(filePath + fileName),
+                    Paths.get(p3ProcessedPath + operator + "/" + source + "/" + fileName));
+
             updateModuleAudit(conn, 200, "Success", "", insertedKey, executionStartTime, fileCount, errorCount);
         } catch (Exception e) {
             logger.error("Errors " + stackTraceElement.getClassName() + "/" + stackTraceElement.getMethodName() + ":" + stackTraceElement.getLineNumber() + e);
@@ -761,16 +761,8 @@ public class CdrParserProcess {
     private static BufferedWriter getSqlFileWriter(Connection conn, String operator, String source, String file) {
         BufferedWriter bw1 = null;
         try {
-            String foldrName = sqlInputPath + "/" + operator.toLowerCase() + "/"; //
-            File file1 = new File(foldrName);
-            if (!file1.exists()) {
-                file1.mkdir();
-            }
-            foldrName += source + "/";
-            file1 = new File(foldrName);
-            if (!file1.exists()) {
-                file1.mkdir();
-            }
+            String foldrName = sqlInputPath + "/" + operator.toLowerCase() + "/"+ source + "/"; //
+           Files.createDirectories(Path.of(foldrName));
             String fileNameInput1 = foldrName + file + ".sql";
             logger.info("SQL_LOADER NAME ..  " + fileNameInput1);
             File fout1 = new File(fileNameInput1);

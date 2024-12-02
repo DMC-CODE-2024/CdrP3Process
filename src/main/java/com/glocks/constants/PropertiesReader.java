@@ -47,4 +47,6 @@ public class PropertiesReader {
     @Value("${sleepTime}")
     public String sleepTime;
 
+    @Value("${p3InputPath}")
+    public String p3InputPath;
 }
