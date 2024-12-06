@@ -210,13 +210,13 @@ public class CdrParserProcess {
 
                     device_info.put("actual_operator", operatorSeries.get(device_info.get("MSISDN").substring(0, 5)));
                     boolean anyMatch = Arrays.stream(testImies).anyMatch(imei -> device_info.get("modified_imei").startsWith(imei));
-                    if (anyMatch) {
-                        String query = " insert into " + appdbName + " .test_imei_details  " + "(imei ,IMSI, record_type , system_type , source,raw_cdr_file_name,imei_arrival_time ,operator, file_name ,msisdn, created_on , modified_on    )  values "
-                                + "('" + device_info.get("modified_imei") + "' , '" + device_info.get("IMSI") + "', '" + device_info.get("record_type") + "' ,'" + device_info.get("system_type") + "' , '" + device_info.get("source") + "',  '" + device_info.get("raw_cdr_file_name") + "', "
-                                + "" + defaultStringtoDate(device_info.get("imei_arrival_time")) + ", '" + device_info.get("operator") + "', '" + device_info.get("file_name") + "',   '" + device_info.get("MSISDN") + "', " + dateFunction + ", " + dateFunction + "  ) ";
-                        logger.info(".test_imei_details Query :: ." + query);
-                        executorService.execute(new InsertDbDao(conn, query));
-                    }
+                   // if (anyMatch) {
+                     //   String query = " insert into " + appdbName + " .test_imei_details  " + "(imei ,IMSI, record_type , system_type , source,raw_cdr_file_name,imei_arrival_time ,operator, file_name ,msisdn, created_on , modified_on    )  values "
+                       //         + "('" + device_info.get("modified_imei") + "' , '" + device_info.get("IMSI") + "', '" + device_info.get("record_type") + "' ,'" + device_info.get("system_type") + "' , '" + device_info.get("source") + "',  '" + device_info.get("raw_cdr_file_name") + "', "
+                         //       + "" + defaultStringtoDate(device_info.get("imei_arrival_time")) + ", '" + device_info.get("operator") + "', '" + device_info.get("file_name") + "',   '" + device_info.get("MSISDN") + "', " + dateFunction + ", " + dateFunction + "  ) ";
+                      //  logger.info(".test_imei_details Query :: ." + query);
+                      //  executorService.execute(new InsertDbDao(conn, query));
+                //    }
                     device_info.put("testImeiFlag", anyMatch ? "1" : "0");
                     String failedRuleDate = null;
                     counter++;
