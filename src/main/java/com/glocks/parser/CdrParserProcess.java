@@ -882,7 +882,7 @@ public class CdrParserProcess {
 
         long milliseconds = (new Date().getTime()) - executionStartTime;
        //  String executionFinishTiime = (((milliseconds / 1000) / 60) / 60) + ":" + (((milliseconds / 1000) / 60) % 60) + ":" + ((milliseconds / 1000) % 60);
-       String executionFinishTiime =  milliseconds;
+       String executionFinishTiime =  (milliseconds / 1000) +""  ;
         String query = null;
         try (Statement stmt = conn.createStatement()) {
 
