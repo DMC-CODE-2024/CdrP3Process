@@ -47,14 +47,14 @@ public class CdrParserProcess {
     static ConnectionConfiguration connectionConfiguration = null;
     static Connection conn = null;
 
-    static int usageInsert = 0;
-    static int usageUpdate = 0;
-    static int duplicateInsert = 0;
-    static int duplicateUpdate = 0;
-    static int usageInsertForeign = 0;
-    static int usageUpdateForeign = 0;
-    static int duplicateInsertForeign = 0;
-    static int duplicateUpdateForeign = 0;
+    //    static int usageInsert = 0;
+//    static int usageUpdate = 0;
+//    static int duplicateInsert = 0;
+//    static int duplicateUpdate = 0;
+//    static int usageInsertForeign = 0;
+//    static int usageUpdateForeign = 0;
+//    static int duplicateInsertForeign = 0;
+//    static int duplicateUpdateForeign = 0;
     static String sqlInputPath;
     static String p3ProcessedPath;
     static String sleepTime;
@@ -106,7 +106,7 @@ public class CdrParserProcess {
         rulelist = getRuleDetails(operator, conn, operator_tag, period);
         logger.debug("rule list to be  " + rulelist);
         for (Path file : getAllFilesList(filePath)) {
-            logger.info("Start executing process for : " + file.getFileName());
+            logger.info("Start  executing process for : " + file.getFileName());
             addCDRInProfileWithRule(operator, conn, rulelist, operator_tag, period, filePath, source, file.getFileName().toString());
             logger.info("Ending executing process for : " + file.getFileName());
         }
@@ -135,7 +135,6 @@ public class CdrParserProcess {
 
     private static void addCDRInProfileWithRule(String operator, Connection conn, ArrayList<Rule> rulelist,
                                                 String operator_tag, String period, String filePath, String source, String fileName) {
-
         ExecutorService executorService = Executors.newCachedThreadPool();
         int insertedKey = insertModuleAudit(conn, "P3", operator + "_" + source + "_" + fileName);
         long executionStartTime = new Date().getTime();
@@ -152,12 +151,14 @@ public class CdrParserProcess {
         String[] data = null;
         BufferedReader br = null;
         FileReader fr = null;
-        BufferedWriter bw1 = null;
+
         int counter = 1;
         int foreignMsisdn = 0;
         int fileParseLimit = 1;
         int errorCount = 0;
         int fileCount = 0;
+        int usageInsert = 0, usageUpdate = 0, duplicateInsert = 0, duplicateUpdate = 0,
+                usageInsertForeign = 0, usageUpdateForeign = 0, duplicateInsertForeign = 0, duplicateUpdateForeign = 0;
         try {
             String server_origin = propertiesReader.serverName;
             file = new File(filePath + fileName);
@@ -167,12 +168,13 @@ public class CdrParserProcess {
             } catch (Exception e) {
                 logger.warn("" + e);
             }
+
+            int cdrfiledetailid = cdrFileDetailsInsert(conn, operator, fileName);
             String enableForeignSimHandling = getSystemConfigDetailsByTag(conn, "enableForeignSimHandling");
             fileParseLimit = getExsistingSqlFileDetails(conn, operator, source, fileName);
             fr = new FileReader(file);
             br = new BufferedReader(fr);
 
-            bw1 = getSqlFileWriter(conn, operator, source, fileName);
             Date p2Starttime = new Date();
             HashMap<String, String> device_info = new HashMap<String, String>();
             RuleFilter rule_filter = new RuleFilter();
@@ -187,6 +189,7 @@ public class CdrParserProcess {
             HashMap<String, Date> validTacMap = getValidTac(conn);
             String dateType = null;
             String oldimei = "0";
+            ArrayList<String> updateQuery = new ArrayList<>();
             while ((line = br.readLine()) != null) {
                 data = line.split(propertiesReader.commaDelimiter, -1);
 
@@ -284,9 +287,7 @@ public class CdrParserProcess {
                         } else {
                             usageInsertForeign++;
                         }
-                    } else if (output == 1) { // new ArrivalTime came from file > arrival time in db already // imei found
-                        // // with same msisdn update_raw_cdr_file_name , update_imei_arrival_time
-                        //    logger.debug("new ArrivalTime  came  from file  >  arrival time in db already");
+                    } else if (output == 1) {
                         my_query = getUpdateUsageDbQueryWithRawCdrFileName(device_info, dateFunction, failed_rule_name, failed_rule_id, period, finalAction, failedRuleDate, server_origin, gsmaTac);
                         if (device_info.get("msisdn_type").equalsIgnoreCase("LocalSim")) {
                             usageUpdate++;
@@ -334,23 +335,28 @@ public class CdrParserProcess {
                     if (my_query.contains("insert")) {
                         executorService.execute(new InsertDbDao(conn, my_query));
                     } else {
-                        //   logger.info(" writing query in file== " + my_query);
-                        bw1.write(my_query + ";");
-                        bw1.newLine();
+                        updateQuery.add(my_query + ";");
+//                        bw1.write(my_query + ";");
+//                        bw1.newLine();
                     }
                     logger.info("Remaining List :: " + (fileCount - (counter + errorCount)));
                 } catch (Exception e) {
                     logger.error("Error in line -- " + Arrays.toString(data) + " [] Error " + e.getLocalizedMessage() + " [] " + e.getMessage() + "Total ErrorCount -- " + errorCount++);
                 }
             } // While End
+            try (BufferedWriter sqlWriter = getSqlFileWriter(conn, operator, source, fileName)) {
+                for (String query : updateQuery) {
+                    sqlWriter.write(query + System.lineSeparator());
+                }
+            }   catch (Exception e) {
+                logger.error("Wont able to write sql in  " +fileName + ". -> " + e);}
             executorService.shutdown();
             Date p2Endtime = new Date();
-            cdrFileDetailsUpdate(conn, operator, device_info.get("file_name"), usageInsert, usageUpdate, duplicateInsert, duplicateUpdate, nullInsert, nullUpdate, p2Starttime, p2Endtime, "all", counter, device_info.get("raw_cdr_file_name"),
-                    foreignMsisdn, server_origin, usageInsertForeign, usageUpdateForeign, duplicateInsertForeign, duplicateUpdateForeign, errorCount);
-            // new com.glocks.files.FileList().moveCDRFile(conn, fileName, operator, filePath, source, p3ProcessedPath);
+            cdrFileDetailsUpdate(conn, cdrfiledetailid, usageInsert, usageUpdate, duplicateInsert, duplicateUpdate, nullInsert, nullUpdate, p2Starttime, p2Endtime, "all", counter, device_info.get("raw_cdr_file_name"),
+                    foreignMsisdn, usageInsertForeign, usageUpdateForeign, duplicateInsertForeign, duplicateUpdateForeign, errorCount);
 
             Files.createDirectories(Path.of(p3ProcessedPath + operator + "/" + source));
-            Path temp = Files.move(Paths.get(filePath + fileName),
+            Files.move(Paths.get(filePath + fileName),
                     Paths.get(p3ProcessedPath + operator + "/" + source + "/" + fileName));
 
             updateModuleAudit(conn, 200, "Success", "", insertedKey, executionStartTime, fileCount, errorCount);
@@ -360,7 +366,6 @@ public class CdrParserProcess {
         } finally {
             try {
                 br.close();
-                bw1.close();
             } catch (Exception e) {
                 logger.error("Errors " + stackTraceElement.getClassName() + "/" + stackTraceElement.getMethodName() + ":" + stackTraceElement.getLineNumber() + e);
             }
@@ -534,40 +539,15 @@ public class CdrParserProcess {
         return value;
     }
 
-//    public static int checkDeviceNullDB(Connection conn, String msisdn) {
-//        String query = null;
-//        ResultSet rs1 = null;
-//        Statement stmt = null;
-//        int status = 0;
-//        try {
-//            query = "select * from " + appdbName + ".null_imei where msisdn='" + msisdn + "'";
-//            logger.debug("device usage db" + query);
-//            stmt = conn.createStatement();
-//            rs1 = stmt.executeQuery(query);
-//            while (rs1.next()) {
-//                status = 1;
-//            }
-//        } catch (Exception e) {
-//            logger.error("Errors " + stackTraceElement.getClassName() + "/" + stackTraceElement.getMethodName() + ":" + stackTraceElement.getLineNumber() + e);
-//        } finally {
-//            try {
-//                stmt.close();
-//                rs1.close();
-//            } catch (SQLException e) {
-//                logger.error("Errors " + stackTraceElement.getClassName() + "/" + stackTraceElement.getMethodName() + ":" + stackTraceElement.getLineNumber() + e);
-//            }
-//        }
-//        return status;
-//    }
-
     private static ArrayList getRuleDetails(String operator, Connection conn, String operator_tag, String period) {
         ArrayList rule_details = new ArrayList<Rule>();
         String query = null;
         ResultSet rs1 = null;
         Statement stmt = null;
         try {
-            query = "select a.id as rule_id,a.name as rule_name,b.output as output,b.grace_action, b.post_grace_action, b.failed_rule_action_grace, b.failed_rule_action_post_grace " + " from " + appdbName + ".rule a, " + appdbName + ".feature_rule b where  a.name=b.name  and a.state='Enabled' and b.feature='CDR' and   b." + period
-                    + "_action !='NA' order by b.rule_order asc";
+            query = "select a.id as rule_id,a.name as rule_name,b.output as output,b.grace_action, b.post_grace_action, b.failed_rule_action_grace, b.failed_rule_action_post_grace " + " from " + appdbName + ".rule a, " + appdbName + ".feature_rule b" +
+                    " where  a.name=b.name  and a.state='Enabled' and b.feature='CDR'" +
+                    "  and  ( b." + period + "_action !='NA' OR  b." + period + "_action !='Disabled')         order by b.rule_order asc";
             logger.info("Query is " + query);
             stmt = conn.createStatement();
             rs1 = stmt.executeQuery(query);
@@ -650,29 +630,61 @@ public class CdrParserProcess {
         return value;
     }
 
-    static void cdrFileDetailsUpdate(Connection conn, String operator, String fileName, int usageInsert, int usageUpdate, int duplicateInsert, int duplicateUpdate, int nullInsert, int nullUpdate, Date P2StartTime, Date P2EndTime, String source, int counter, String raw_cdr_file_name,
-                                     int foreignMsisdn, String server_origin, int usageInsertForeign, int usageUpdateForeign, int duplicateInsertForeign, int duplicateUpdateForeign, int errorCount) {
-        String query = null;
-        DateFormat df = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
-        Statement stmt = null;
-        query = "insert into  " + appdbName + ".cdr_file_processed_detail (total_inserts_in_usage_db,total_updates_in_usage_db ,total_insert_in_dup_db , total_updates_in_dup_db , total_insert_in_null_db , total_update_in_null_db , startTime , endTime ,operator , file_name, total_records_count ,"
-                + " raw_cdr_file_name  ,source  ,foreignMsisdn  , STATUS , server_origin , total_inserts_in_foreignusage_db,total_updates_in_foreignusage_db ,total_insert_in_foreigndup_db , total_updates_in_foreigndup_db,total_error_record_count ) "
-                + "values(   '" + usageInsert + "' , '" + usageUpdate + "'  , '" + duplicateInsert + "' , '" + duplicateUpdate + "' " + " ,'" + nullInsert + "' ,'" + nullUpdate + "', " + defaultStringtoDate(df.format(P2StartTime)) + " , " + defaultStringtoDate(df.format(P2EndTime)) + " ,   '" + operator + "', '" + fileName + "' , '"
-                + (counter - 1) + "' , '" + raw_cdr_file_name + "' , '" + source + "'  , '" + foreignMsisdn + "' , 'End' ,  '" + server_origin + "'   ,   '" + usageInsertForeign + "' , '" + usageUpdateForeign + "'  , '" + duplicateInsertForeign + "' , '" + duplicateUpdateForeign + "'  , '" + errorCount + "'     )  ";
-        logger.info(" query is " + query);
 
+    static int cdrFileDetailsInsert(Connection conn, String operator, String fileName) {
+        int generatedKey = 0;
+        String query = " insert into  " + appdbName + ".cdr_file_processed_detail " + "(operator , file_name , status , server_origin ,source ) "
+                + "values('" + operator + "', '" + fileName + "' ,'p3_inprocess', '" + serverName + "','all')";
+        logger.info(query);
         try {
-            stmt = conn.createStatement();
-            stmt.executeUpdate(query);
-            stmt.close();
-        } catch (SQLException e) {
-            logger.error("" + stackTraceElement.getClassName() + "/" + stackTraceElement.getMethodName() + ":" + stackTraceElement.getLineNumber() + e);
-        } finally {
-            try {
-                stmt.close();
-            } catch (SQLException e) {
-                logger.error("[Query]" + query + " []" + "" + stackTraceElement.getClassName() + "/" + stackTraceElement.getMethodName() + ":" + stackTraceElement.getLineNumber() + e);
+            PreparedStatement ps = conn.prepareStatement(query, Statement.RETURN_GENERATED_KEYS);
+            ps.execute();
+            ResultSet rs = ps.getGeneratedKeys();
+            if (rs.next()) {
+                generatedKey = rs.getInt(1);
             }
+            logger.info("Inserted record's ID: " + generatedKey);
+            rs.close();
+        } catch (Exception e) {
+            logger.error("Failed  " + e);
+        }
+        return generatedKey;
+    }
+
+    static void cdrFileDetailsUpdate(Connection conn, int cdrfiledetailid, int usageInsert, int usageUpdate, int duplicateInsert, int duplicateUpdate, int nullInsert, int nullUpdate, Date P2StartTime, Date P2EndTime, String source, int counter, String raw_cdr_file_name,
+                                     int foreignMsisdn, int usageInsertForeign, int usageUpdateForeign, int duplicateInsertForeign, int duplicateUpdateForeign, int errorCount) {
+        DateFormat df = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+//        query = "insert into  " + appdbName + ".cdr_file_processed_detail (total_inserts_in_usage_db,total_updates_in_usage_db ,total_insert_in_dup_db , total_updates_in_dup_db , total_insert_in_null_db , total_update_in_null_db , startTime , endTime ,operator , file_name, total_records_count ,"
+//                + " raw_cdr_file_name  ,source  ,foreignMsisdn  , STATUS , server_origin , total_inserts_in_foreignusage_db,total_updates_in_foreignusage_db ,total_insert_in_foreigndup_db , total_updates_in_foreigndup_db,total_error_record_count ) "
+//                + "values(   '" + usageInsert + "' , '" + usageUpdate + "'  , '" + duplicateInsert + "' , '" + duplicateUpdate + "' " + " ,'" + nullInsert + "' ,'" + nullUpdate + "', " + defaultStringtoDate(df.format(P2StartTime)) + " , " + defaultStringtoDate(df.format(P2EndTime)) + " ,   '" + operator + "', '" + fileName + "' , '"
+//                + (counter - 1) + "' , '" + raw_cdr_file_name + "' , '" + source + "'  , '" + foreignMsisdn + "' , 'End' ,  '" + server_origin + "'   ,   '" + usageInsertForeign + "' , '" + usageUpdateForeign + "'  , '" + duplicateInsertForeign + "' , '" + duplicateUpdateForeign + "'  , '" + errorCount + "'     )  ";
+//        logger.info(" query is " + query);
+
+        String updateQuery = "UPDATE " + appdbName + ".cdr_file_processed_detail "
+                + "SET total_inserts_in_usage_db = '" + usageInsert + "', "
+                + "total_updates_in_usage_db = '" + usageUpdate + "', "
+                + "total_insert_in_dup_db = '" + duplicateInsert + "', "
+                + "total_updates_in_dup_db = '" + duplicateUpdate + "', "
+                + "total_insert_in_null_db = '" + nullInsert + "', "
+                + "total_update_in_null_db = '" + nullUpdate + "', "
+                + "startTime = " + defaultStringtoDate(df.format(P2StartTime)) + ", "
+                + "endTime = " + defaultStringtoDate(df.format(P2EndTime)) + ", "
+                + "total_records_count = '" + (counter - 1) + "', "
+                + "raw_cdr_file_name = '" + raw_cdr_file_name + "', "
+                + "source = '" + source + "', "
+                + "foreignMsisdn = '" + foreignMsisdn + "', "
+                + "STATUS = 'p3_done', "
+                + "total_inserts_in_foreignusage_db = '" + usageInsertForeign + "', "
+                + "total_updates_in_foreignusage_db = '" + usageUpdateForeign + "', "
+                + "total_insert_in_foreigndup_db = '" + duplicateInsertForeign + "', "
+                + "total_updates_in_foreigndup_db = '" + duplicateUpdateForeign + "', "
+                + "total_error_record_count = '" + errorCount + "' "
+                + "WHERE id =" + cdrfiledetailid;
+        logger.info(" query is " + updateQuery);
+        try (Statement stmt = conn.createStatement();) {
+            stmt.executeUpdate(updateQuery);
+        } catch (Exception e) {
+            logger.error("" + stackTraceElement.getClassName() + "/" + stackTraceElement.getMethodName() + ":" + stackTraceElement.getLineNumber() + e);
         }
     }
 
@@ -761,8 +773,8 @@ public class CdrParserProcess {
     private static BufferedWriter getSqlFileWriter(Connection conn, String operator, String source, String file) {
         BufferedWriter bw1 = null;
         try {
-            String foldrName = sqlInputPath + "/" + operator.toLowerCase() + "/"+ source + "/"; //
-           Files.createDirectories(Path.of(foldrName));
+            String foldrName = sqlInputPath + "/" + operator.toLowerCase() + "/" + source + "/"; //
+            Files.createDirectories(Path.of(foldrName));
             String fileNameInput1 = foldrName + file + ".sql";
             logger.info("SQL_LOADER NAME ..  " + fileNameInput1);
             File fout1 = new File(fileNameInput1);
