@@ -6,6 +6,7 @@ import org.apache.logging.log4j.Logger;
 
 import java.sql.Connection;
 import java.sql.Statement;
+import java.util.Date;
 import java.util.Map;
 
 //ETl-Class
@@ -31,22 +32,14 @@ public class InsertDbDao implements Runnable {
         this.map = map;
     }
 
-    public void insertIntoTable(Connection conn, String query) {
-        try (Statement stmtNew = conn.createStatement()) {
-            stmtNew.executeUpdate(query);
-        } catch (Exception e) {
-            logger.error("[]" + query + "[] Error occured in Thread while inserting query  -- " + e.getLocalizedMessage() + "At ---" + e);
-
-        }
-    }
-
     @Override
     public void run() {
-        logger.info("[RUNNABLE Query]" + query);
+        var date = new Date();
         try (Statement stmtNew = conn.createStatement()) {
             stmtNew.executeUpdate(query);
+            logger.info("Query->  [" + query + " ] . at  " + date);
         } catch (Exception e) {
-            logger.error("[]" + query + "[] Error occured in Thread while inserting query  -- " + e.getLocalizedMessage() + "At ---" + e);
+            logger.error("ThreadError-- {} ->-<- {}  --- [{}] . Time {}", e.getLocalizedMessage(), e, query, date);
         }
     }
 
